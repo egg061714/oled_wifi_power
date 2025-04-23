@@ -1,0 +1,30 @@
+{
+    "C_Cpp.intelliSenseEngine": "default",
+    "idf.espIdfPathWin": "c:\\Users\\Egg\\esp\\esp-idf-v5.3.1",
+    "idf.pythonInstallPath": "C:\\Users\\Egg\\.espressif\\tools\\idf-python\\3.11.2\\python.exe",
+    "idf.openOcdConfigs": [
+        "board/esp32-bridge.cfg"
+    ],
+    "idf.portWin": "COM6",
+    "idf.toolsPathWin": "C:\\Users\\Egg\\.espressif",
+    "idf.flashType": "UART",
+    "files.associations": {
+        "ssd1306.h": "c",
+        "i2c.h": "c",
+        "gpio.h": "c",
+        "*.tcc": "c",
+        "charconv": "c",
+        "chrono": "c",
+        "optional": "c",
+        "format": "c",
+        "ratio": "c",
+        "system_error": "c",
+        "array": "c",
+        "functional": "c",
+        "regex": "c",
+        "tuple": "c",
+        "type_traits": "c",
+        "utility": "c",
+        "numbers": "c"
+    }
+}
