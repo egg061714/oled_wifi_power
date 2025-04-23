@@ -25,6 +25,14 @@
         "tuple": "c",
         "type_traits": "c",
         "utility": "c",
-        "numbers": "c"
-    }
+        "numbers": "c",
+        "string.h": "c",
+        "esp_log.h": "c",
+        "image.h": "c",
+        "adc.h": "c",
+        "esp_wifi.h": "c",
+        "esp_event.h": "c",
+        "esp_mac.h": "c"
+    },
+    "C_Cpp.errorSquiggles": "disabled"
 }
