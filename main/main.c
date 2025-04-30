@@ -6,17 +6,18 @@
 #include <string.h>
 #include "driver/adc.h"
 #include "esp_log.h"
-#include "image.h"
-
-//==========上方為oled宣告=======
+#include "image.h"        //icon儲存地
 #include "esp_wifi.h"
 #include "esp_event.h"
-#include "esp_log.h"
+#include "nvs.h"
 #include "nvs_flash.h"
-#include "esp_mac.h"  // 修正：加入 MAC 地址相關的標頭檔案
+#include "esp_mac.h"
+#include "wifi_provisioning/manager.h"
+#include "wifi_provisioning/scheme_ble.h"
+#include "protocomm_security.h"
+#include "esp_bt.h"
 
 
-//=========上方為wifi宣告=========
 #define I2C_MASTER_NUM I2C_NUM_0
 #define I2C_MASTER_SCL_IO 22
 #define I2C_MASTER_SDA_IO 21
@@ -25,27 +26,116 @@
 #define THRESHOLD 30
 #define button GPIO_NUM_19
 
-
-
 #define SSID "wifi_ap"
 #define PASSWORD "12345678"
+#define bluename "PROV_ESP32"
+
 static const char *TAG = "MY_AP_MODE";
 int8_t powerset;
-
 
 char buf[20];
 char vr[20];
 int gamemode=1;
 int flash[2];
 int adc_reading;
-int level;
+int level=1;
 int allmode;
 bool is_running=false;
 bool indo = false;
-
+bool is_ble_initialized = false;  // ← 新增的狀態追蹤變數
+bool blu_open=false;
+bool prov;
 SSD1306_t dev;
-wifi_config_t wifi_config ;
-int map(int x, int in_min, int in_max, int out_min, int out_max) ;
+wifi_config_t wifi_config;
+
+
+/* ------- 檔案頂端，全域常量 -------- */
+wifi_prov_security_t security = WIFI_PROV_SECURITY_1;
+const char *pop = "abcd1234";
+const char *service_name = bluename;
+const char *service_key = NULL;
+int map(int x, int in_min, int in_max, int out_min, int out_max);
+
+void reset_wifi_config() {
+    nvs_handle_t nvs_handle;
+    esp_err_t err;
+
+    err = nvs_open("nvs.net80211", NVS_READWRITE, &nvs_handle);
+    if (err == ESP_OK) {
+        nvs_erase_all(nvs_handle);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+        ESP_LOGI("RESET", "✅ Wi-Fi 設定已清除！裝置將重新啟動...");
+        vTaskDelay(pdMS_TO_TICKS(500)); // 等一點時間讓log送出
+        esp_restart(); // 🔥 這行很重要！重開才會真的"忘記"配網狀態
+    } else {
+        ESP_LOGE("RESET", "⚠️ 無法開啟 Wi-Fi NVS，錯誤代碼: %s", esp_err_to_name(err));
+    }
+}
+
+static void wifi_event_handler_sta(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        esp_wifi_connect();
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ESP_LOGI(TAG, "✅ Wi-Fi 連線成功!");
+        
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        ESP_LOGE(TAG, "⚠️ Wi-Fi 斷線，重新嘗試...");
+        esp_wifi_connect();
+    }
+}
+static void prov_event_handler(void *user_data, wifi_prov_cb_event_t event, void *event_data) {
+    switch (event) {
+        case WIFI_PROV_START:
+            ESP_LOGI(TAG, "📡 BLE Provisioning 開始...");
+            break;
+        case WIFI_PROV_CRED_RECV: {
+            wifi_sta_config_t *wifi_sta_cfg = (wifi_sta_config_t *)event_data;
+            ESP_LOGI(TAG, "📥 接收到 Wi-Fi 設定 -> SSID: %s, 密碼: %s",
+                     (const char *)wifi_sta_cfg->ssid,
+                     (const char *)wifi_sta_cfg->password);
+            break;
+        }
+        case WIFI_PROV_CRED_SUCCESS:
+            ESP_LOGI(TAG, "✅ Provisioning 成功");
+            break;
+        case WIFI_PROV_END:
+            ESP_LOGI(TAG, "⚡ Provisioning 結束");
+            
+            is_ble_initialized = false;  // ← BLE 關閉時重設狀態
+            break;
+        default:
+            break;
+    }
+}
+
+void final_mode() {
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    if(blu_open==false)
+    {
+    ESP_ERROR_CHECK(wifi_prov_mgr_is_provisioned(&prov));  // <<== 加上這行！正確讀取狀態
+
+    if (!prov) {
+        ESP_LOGI(TAG, "🔵 沒憑證，啟動 BLE 配對...");
+        if (!is_ble_initialized) {
+            wifi_prov_mgr_config_t config = {
+                .scheme = wifi_prov_scheme_ble,
+                .scheme_event_handler = WIFI_PROV_SCHEME_BLE_EVENT_HANDLER_FREE_BTDM
+            };
+            ESP_ERROR_CHECK(wifi_prov_mgr_init(config));
+            is_ble_initialized = true;
+        }
+        ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(security, pop, service_name, service_key));
+        blu_open = true;
+    } else {
+        ESP_LOGI(TAG, "📶 已有憑證，直接連線 Wi-Fi");
+        // 這邊不用再 set_mode 和 start了，因為上面已經 start Wi-Fi
+    }
+    }
+}
+
+
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,int32_t event_id, void *event_data) {
     if (event_base == WIFI_EVENT) {
         switch (event_id) {
@@ -53,15 +143,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,int32_t ev
                 wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *)event_data;
                 ESP_LOGI(TAG, "Station connected - MAC: " MACSTR ", AID=%d",
                          MAC2STR(event->mac), event->aid);
-
-                // 取得所有已連線的 Station 資料
                 wifi_sta_list_t sta_list;
                 if (esp_wifi_ap_get_sta_list(&sta_list) == ESP_OK) {
-                    // 列印每個 Station 的 RSSI
                     for (int i = 0; i < sta_list.num; i++) {
                         wifi_sta_info_t station = sta_list.sta[i];
-                        ESP_LOGI(TAG, "Station " MACSTR " RSSI = %d dBm",
-                                 MAC2STR(station.mac), station.rssi);
+                        ESP_LOGI(TAG, "Station " MACSTR " RSSI = %d dBm", MAC2STR(station.mac), station.rssi);
                     }
                 }
                 break;
@@ -77,15 +163,25 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,int32_t ev
         }
     }
 }
+
+
+
+void nvs_init()
+{
+    // 初始化 NVS（用於儲存 Wi-Fi 設定等）
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+}
+
+
 void wifi_egg_init()
 {
-      // 初始化 NVS（用於儲存 Wi-Fi 設定等）
-      esp_err_t ret = nvs_flash_init();
-      if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-          ESP_ERROR_CHECK(nvs_flash_erase());
-          ret = nvs_flash_init();
-      }
-      ESP_ERROR_CHECK(ret);
+      
+
   
       // 初始化網路介面及事件迴圈
       ESP_ERROR_CHECK(esp_netif_init());
@@ -93,7 +189,7 @@ void wifi_egg_init()
   
       // 建立預設的 AP 網路介面
       esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
-  
+      esp_netif_create_default_wifi_sta();
       // Wi-Fi 初始化
       wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
       ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -106,8 +202,14 @@ void wifi_egg_init()
               &wifi_event_handler,
               NULL,
               NULL));
-  
-      // 設定 Wi-Fi 模式為 AP
+
+              ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler_sta, NULL));
+              ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler_sta, NULL));
+          
+      
+
+
+
 
 }
 void wifi_power()
@@ -159,10 +261,10 @@ void vrx()
         if (abs(diff) > THRESHOLD) {
             if (diff > 0) {
                 gamemode++;
-                if (gamemode > 4) gamemode = 1;
+                if (gamemode > 5) gamemode = 1;
             } else {
                 gamemode--;
-                if (gamemode < 1) gamemode = 4;
+                if (gamemode < 1) gamemode = 5;
             }
             last_value = adc_reading;
         }
@@ -178,7 +280,7 @@ void button_state(int button)
 
 
             level = gpio_get_level(button);
-            // printf("GPIO2 Level: %d\n", level);
+            printf("GPIO2 Level: %d\n", level);
             // sprintf(buf, "%d", level);
             vTaskDelay(5); // 每500ms讀一次
 
@@ -240,7 +342,26 @@ void doing(int allmode)
     {
       wifi_power();  
     }
+    break;
+
+    case 4:
+    if (level == 0) {
+        is_running = false;  // 結束當前模式
+        allmode = 0;
+        indo=false;
+        blu_open = true;  // 🔒 不能連 BLE
+        ssd1306_clear_screen(&dev, false);
+
+
     
+        is_ble_initialized=true;
+        ESP_ERROR_CHECK(esp_wifi_stop());
+
+    }else
+    {
+        printf("game over");
+        final_mode();
+    }   
         break;
     
     default:
@@ -277,8 +398,36 @@ void mode(int gamemode)
     show_lig_icon(&dev);
         break;
     case 4:
-    show_cycu_logo(&dev);
-        break;                    
+    
+    if( is_running!= true)   //表示還沒觸發
+    {
+        show_cycu_logo(&dev);
+        if(level==0)
+        {
+            ssd1306_clear_screen(&dev, false);
+            allmode=4;
+            is_running=true;
+            indo=true;
+            blu_open = false;
+
+            
+        }
+    }else
+    {
+        doing(allmode);
+    }
+        break;    
+        
+    case 5:    //重置mode
+    
+        show_reset_logo(&dev);
+            if(level==0)
+            {
+                ssd1306_clear_screen(&dev, false);
+                reset_wifi_config();
+            }
+
+    break;  
     default:
         break;
     }
@@ -286,9 +435,11 @@ void mode(int gamemode)
 
 void app_main(void)
 {
-    
+    ESP_ERROR_CHECK(esp_bt_mem_release(ESP_BT_MODE_CLASSIC_BT));
+    nvs_init();//初始化nvs
     oled_config_egg_init();
     wifi_egg_init();
+
     while(1)
     {
         button_state(button);

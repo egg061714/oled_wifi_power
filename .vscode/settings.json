@@ -32,7 +32,11 @@
         "adc.h": "c",
         "esp_wifi.h": "c",
         "esp_event.h": "c",
-        "esp_mac.h": "c"
+        "esp_mac.h": "c",
+        "scheme_ble.h": "c",
+        "manager.h": "c",
+        "protocomm_security.h": "c",
+        "nvs_flash.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled"
 }
