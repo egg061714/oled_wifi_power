@@ -45,6 +45,9 @@ bool indo = false;
 bool is_ble_initialized = false;  // ← 新增的狀態追蹤變數
 bool blu_open=false;
 bool prov;
+int power=9;
+int powerstatus=8;
+
 SSD1306_t dev;
 wifi_config_t wifi_config;
 
@@ -214,37 +217,50 @@ void wifi_egg_init()
 }
 void wifi_power()
 {
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    power=map(adc_reading ,0,511,8,84);
+    if(abs(power - powerstatus) >= 2)
+    {
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
   
-    // 設定 AP 參數 (SSID, 密碼, 信道, max_connection, authmode 等)
-    wifi_config_t wifi_config = {
-        .ap = {
-            .ssid = SSID,               // AP SSID
-            .ssid_len = strlen(SSID),
-            .password = PASSWORD,       // AP 密碼
-            .channel = 1,               // 可自行更改
-            .max_connection = 4,        // 可連線之裝置數
-            .authmode = WIFI_AUTH_WPA2_PSK
-        },
-    };
-   
-       ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
-       ESP_ERROR_CHECK(esp_wifi_start());
-       int power=map(adc_reading ,0,511,8,80);
-       ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(power));
-       if(power<10)
-        ssd1306_clear_screen(&dev, false);
-       sprintf(vr, "%d",  power);
-       ssd1306_display_text(&dev, 0, vr, strlen(vr), false);
-   
-       ESP_LOGI(TAG, "Wi-Fi AP init done. SSID:%s Password:%s Channel:%d",
-                wifi_config.ap.ssid, wifi_config.ap.password, wifi_config.ap.channel);
-   
-       ESP_ERROR_CHECK(esp_wifi_get_max_tx_power(&powerset));
-       ESP_LOGI(TAG, "初始 Tx Power：%.2f dBm", powerset * 0.25);
-       sprintf(buf, "%f",  powerset * 0.25);
-       ssd1306_display_text(&dev, 4, buf, strlen(buf), false);
+        // 設定 AP 參數 (SSID, 密碼, 信道, max_connection, authmode 等)
+        wifi_config_t wifi_config = {
+            .ap = {
+                .ssid = SSID,               // AP SSID
+                .ssid_len = strlen(SSID),
+                .password = PASSWORD,       // AP 密碼
+                .channel = 1,               // 可自行更改
+                .max_connection = 4,        // 可連線之裝置數
+                .authmode = WIFI_AUTH_WPA2_PSK
+            },
+        };
+       
+           ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+           ESP_ERROR_CHECK(esp_wifi_start());
+           
+           powerstatus=power;
+           ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(power));
+           if(power<10)
+            ssd1306_clear_screen(&dev, false);
+           sprintf(vr, "%d",  power);
+           ssd1306_display_text(&dev, 0, vr, strlen(vr), false);
+       
+           ESP_LOGI(TAG, "Wi-Fi AP init done. SSID:%s Password:%s Channel:%d",
+                    wifi_config.ap.ssid, wifi_config.ap.password, wifi_config.ap.channel);
+       
+           ESP_ERROR_CHECK(esp_wifi_get_max_tx_power(&powerset));
+           ESP_LOGI(TAG, "初始 Tx Power：%.2f dBm", powerset * 0.25);
+           sprintf(buf, "%f",  powerset * 0.25);
+           ssd1306_display_text(&dev, 4, buf, strlen(buf), false);
+    }
+    else
+    {
+        
+        ESP_ERROR_CHECK(esp_wifi_get_max_tx_power(&powerset));
+        ESP_LOGI(TAG, "初始 Tx Power：%.2f dBm", powerset * 0.25);
+        sprintf(buf, "%f",  powerset * 0.25);
+        ssd1306_display_text(&dev, 4, buf, strlen(buf), false);
+    }
+
 
 }
 
